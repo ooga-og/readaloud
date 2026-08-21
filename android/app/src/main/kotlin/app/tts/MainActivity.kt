@@ -1,4 +1,4 @@
-﻿package app.readaloud.reader
+﻿package app.tts
 
 import io.flutter.embedding.android.FlutterActivity
 

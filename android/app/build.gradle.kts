@@ -16,7 +16,7 @@ if (keystorePropertiesFile.exists()) {
 }
 
 android {
-    namespace = "app.readaloud.reader"
+    namespace = "app.tts"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -26,9 +26,9 @@ android {
     }
 
     defaultConfig {
-        // Unique, neutral Application ID. Changeable ONLY until the first
-        // Play upload — after that it is permanent.
-        applicationId = "app.readaloud.reader"
+        // Must match the package name registered in the Play Console for
+        // this app entry. Permanent once the first upload is accepted.
+        applicationId = "app.tts"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
