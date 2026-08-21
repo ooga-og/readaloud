@@ -1,4 +1,4 @@
-import java.io.FileInputStream
+﻿import java.io.FileInputStream
 import java.util.Properties
 
 plugins {
@@ -16,7 +16,7 @@ if (keystorePropertiesFile.exists()) {
 }
 
 android {
-    namespace = "app.tts"
+    namespace = "apps.tts"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -28,7 +28,7 @@ android {
     defaultConfig {
         // Must match the package name registered in the Play Console for
         // this app entry. Permanent once the first upload is accepted.
-        applicationId = "app.tts"
+        applicationId = "apps.tts"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
@@ -73,3 +73,4 @@ kotlin {
 flutter {
     source = "../.."
 }
+
