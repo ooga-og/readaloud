@@ -64,7 +64,7 @@ class ReadAloudApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'ReadAloud',
+      title: 'TTS',
       theme: ThemeData(
         colorSchemeSeed: Colors.teal,
         brightness: Brightness.light,
@@ -209,14 +209,14 @@ class _HomeScreenState extends State<HomeScreen> {
     final library = Store.library;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('ReadAloud'),
+        title: const Text('TTS'),
         actions: [
           IconButton(
             icon: const Icon(Icons.info_outline),
             tooltip: 'About & licenses',
             onPressed: () => showAboutDialog(
               context: context,
-              applicationName: 'ReadAloud',
+              applicationName: 'TTS',
               applicationVersion: '1.0.0',
               applicationLegalese: '© 2026 · GNU GPL v3\n\n'
                   'Neural voice: Piper "northern_english_male", trained on '
