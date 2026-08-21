@@ -33,9 +33,9 @@ What remains is Play Console work — none of it is code.
    contact address) appears on the listing. Decide what you're comfortable
    showing; a neutral developer name is allowed for personal accounts.
 2. **Create app** → fill in name "ReadAloud", default language, App, Free.
-3. **Privacy policy**: Play requires a public URL. `PRIVACY.md` in this
-   project is ready to paste — host it anywhere public (GitHub Pages, a
-   gist, Notion public page) and give Play that URL.
+3. **Privacy policy**: use this public URL (the policy is hosted in the
+   app's GitHub repo):
+   `https://github.com/ooga-og/readaloud/blob/main/PRIVACY.md`
 4. **Data safety form**: declare — collects no data, shares no data, no
    security practices needed (nothing leaves the device). This matches the
    app: it has no INTERNET permission at all.

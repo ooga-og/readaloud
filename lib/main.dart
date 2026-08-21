@@ -25,7 +25,7 @@ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
 FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
 more details: https://www.gnu.org/licenses/gpl-3.0.html
 
-Source code: see the repository linked from the app's store listing.''');
+Source code: https://github.com/ooga-og/readaloud''');
     yield const LicenseEntryWithLineBreaks(
         ['Piper voice model "northern_english_male"'], '''
 The bundled neural voice is the Piper text-to-speech model
