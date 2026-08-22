@@ -276,6 +276,30 @@ Epsilon zeta? Eta theta.
     }
   });
 
+  test('TXT: UTF-16 (Notepad "Unicode") file decodes to words, not letters',
+      () async {
+    const text = 'The cat sat on the mat. It was happy.';
+    final units = <int>[0xFEFF, ...text.codeUnits]; // BOM + UTF-16LE
+    final bytes = <int>[];
+    for (final u in units) {
+      bytes.add(u & 0xFF);
+      bytes.add(u >> 8);
+    }
+    final f = File('${tmp.path}${Platform.pathSeparator}utf16.txt');
+    await f.writeAsBytes(bytes);
+    final b = await extractBook(f.path);
+    checkInvariants(b);
+    expect(b.sentences, ['The cat sat on the mat.', 'It was happy.']);
+  });
+
+  test('spaced-out letters ("T h e  c a t") are rebuilt into words', () async {
+    final b = await fromTxt('T h e  c a t  s a t  o n  t h e  m a t .\n'
+        'Normal line stays exactly as it is.');
+    checkInvariants(b);
+    expect(b.sentences.first, 'The cat sat on the mat.');
+    expect(b.sentences.last, 'Normal line stays exactly as it is.');
+  });
+
   test('empty/garbage file yields zero sentences, not a crash', () async {
     final f = File('${tmp.path}${Platform.pathSeparator}book.txt');
     await f.writeAsString('   \n\n   ');

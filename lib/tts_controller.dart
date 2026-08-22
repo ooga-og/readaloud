@@ -39,7 +39,7 @@ class TtsController extends ChangeNotifier {
   /// first sentence after Play — the UI shows a spinner instead of dead air.
   bool preparing = false;
 
-  bool get _usePiper => voice?['engine'] == 'piper';
+  bool get _usePiper => !usingSystemVoice;
 
   /// Index of the sentence being (or about to be) spoken.
   int current = 0;
@@ -62,9 +62,9 @@ class TtsController extends ChangeNotifier {
   int get highlightStart => playing && !progressSeen ? _chunkStart : current;
   int get highlightEnd => playing && !progressSeen ? _chunkEnd : current + 1;
 
-  /// System voices as {name, locale} maps, sorted by locale then name.
-  List<Map<String, String>> voices = [];
-  Map<String, String>? voice; // null = system default
+  /// True only if the bundled neural voice failed on this device and we had
+  /// to fall back to the platform's own TTS engine for the session.
+  bool usingSystemVoice = false;
   double rate = 0.5; // our scale: 0.25–1.0 shown as 0.5x–2.0x, 0.5 = normal
 
   /// Utterance generation guard. Completion/progress events arrive
@@ -103,36 +103,20 @@ class TtsController extends ChangeNotifier {
       ..bindCompletion()
       ..onComplete = _onUtteranceDone;
 
-    await _loadVoices();
-    final saved = Store.voice;
-    if (saved != null && voices.any((v) => v['name'] == saved['name'])) {
-      await setVoice(saved);
-    }
+    // Warm the neural voice up in the background right away (unpack on first
+    // ever launch, then load the model) so the first press of play is quick
+    // instead of a long pause. Failure here is not fatal: play() will retry,
+    // and fall back to the system voice if it fails again.
+    _piper.init().catchError((e) => debugPrint('Voice warm-up failed: $e'));
   }
 
-  Future<void> _loadVoices() async {
-    try {
-      final raw = await _tts.getVoices;
-      voices = [
-        for (final v in (raw as List))
-          {
-            'name': '${(v as Map)['name']}',
-            'locale': '${v['locale']}',
-          }
-      ]..sort((a, b) {
-          final l = a['locale']!.compareTo(b['locale']!);
-          return l != 0 ? l : a['name']!.compareTo(b['name']!);
-        });
-    } catch (e) {
-      debugPrint('Could not list voices: $e');
-      voices = [];
-    }
-    // The bundled neural voice always tops the list.
-    voices.insert(0, {
-      'name': PiperEngine.voiceName,
-      'locale': PiperEngine.voiceLocale,
-      'engine': 'piper',
-    });
+  /// The bundled voice could not load or synthesize on this device: switch
+  /// to the platform's TTS for the rest of the session and keep reading.
+  void _fallBackToSystemVoice(Object reason) {
+    debugPrint('Neural voice unavailable, using system TTS: $reason');
+    usingSystemVoice = true;
+    notifyListeners();
+    if (playing) _speakCurrent();
   }
 
   /// Attach a freshly loaded book and restore its saved position.
@@ -223,9 +207,19 @@ class TtsController extends ChangeNotifier {
     }
   }
 
-  /// Neural path: ONE sentence per utterance (synthesis latency is the
-  /// bottleneck), with the next sentence prefetched while this one plays —
-  /// gapless playback plus exact-sentence highlighting on every platform.
+  /// The current sentence split into clause-sized pieces for the neural
+  /// voice, and which piece is playing. Synthesis time is proportional to
+  /// text length, so a 60-word sentence synthesized whole would mean a long
+  /// wait before the first word; pieces start playing almost immediately
+  /// while the rest are prefetched. The highlight stays on the sentence.
+  List<String> _pieces = const [];
+  int _pieceIdx = 0;
+
+  double get _neuralSpeed => (rate * 2).clamp(0.5, 2.0);
+
+  /// Neural path: one sentence = one highlight unit, spoken as a chain of
+  /// clause pieces with the next piece always synthesizing in the
+  /// background — gapless playback plus exact-sentence highlighting.
   Future<void> _speakCurrentPiper() async {
     final b = book!;
     _chunkStart = current;
@@ -233,30 +227,76 @@ class TtsController extends ChangeNotifier {
     _chunkOffsets = const [0];
     _gen++;
     _pendingGen = _gen;
-    final gen = _gen;
-    final speed = (rate * 2).clamp(0.5, 2.0);
+    _pieces = _splitForSynthesis(b.sentences[current]);
+    _pieceIdx = 0;
+    notifyListeners();
+    await _playPiece(_gen);
+  }
+
+  /// Synthesize and play piece [_pieceIdx] of the current sentence, then
+  /// prefetch whatever comes next (the following piece, or the first piece
+  /// of the next sentence).
+  Future<void> _playPiece(int gen) async {
+    final b = book!;
+    final speed = _neuralSpeed;
     preparing = true;
     notifyListeners();
     try {
       if (!_piper.ready) await _piper.init(); // first use: unpack + load model
-      final audio = await _piper.synthesize(b.sentences[current], speed);
+      final audio = await _piper.synthesize(_pieces[_pieceIdx], speed);
       if (gen != _gen || !playing) return; // superseded while synthesizing
       if (audio == null) {
-        playing = false;
+        _fallBackToSystemVoice('synthesis returned no audio');
         return;
       }
       _startedGen = gen; // the player has no start event; mark it here
       await _piper.play(audio);
-      if (current + 1 < b.sentences.length) {
-        _piper.prefetch(b.sentences[current + 1], speed);
-      }
+      // Queue the next couple of pieces: the rest of this sentence first,
+      // then the start of the next sentence.
+      final upcoming = <String>[
+        ..._pieces.skip(_pieceIdx + 1),
+        if (current + 1 < b.sentences.length)
+          ..._splitForSynthesis(b.sentences[current + 1]),
+      ];
+      if (upcoming.isNotEmpty) _piper.prefetch(upcoming, speed);
     } catch (e) {
-      debugPrint('Neural voice failed: $e');
-      playing = false;
+      if (gen == _gen) _fallBackToSystemVoice(e);
     } finally {
       preparing = false;
       notifyListeners();
     }
+  }
+
+  /// Split a sentence at clause punctuation into pieces of a comfortable
+  /// size for synthesis (short sentences stay whole). Pieces shorter than
+  /// [minPiece] are merged with their neighbour so the voice doesn't chop
+  /// "Yes," into its own utterance.
+  static List<String> _splitForSynthesis(String sentence) {
+    const maxWhole = 140; // sentences up to this many chars stay whole
+    const minPiece = 50;
+    if (sentence.length <= maxWhole) return [sentence];
+    final parts = sentence
+        .split(RegExp(r'(?<=[,;:—–])\s+'))
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+    final out = <String>[];
+    var buf = '';
+    for (final p in parts) {
+      buf = buf.isEmpty ? p : '$buf $p';
+      if (buf.length >= minPiece) {
+        out.add(buf);
+        buf = '';
+      }
+    }
+    if (buf.isNotEmpty) {
+      if (out.isEmpty) {
+        out.add(buf);
+      } else {
+        out[out.length - 1] = '${out.last} $buf';
+      }
+    }
+    return out.isEmpty ? [sentence] : out;
   }
 
   void _onUtteranceDone() {
@@ -264,6 +304,13 @@ class TtsController extends ChangeNotifier {
     if (_startedGen != _gen) return; // stale: from a flushed/stopped utterance
     final b = book;
     if (b == null) return;
+    // Neural voice: more pieces of this sentence left? Play the next one
+    // (same generation — the sentence hasn't changed).
+    if (_usePiper && _pieceIdx + 1 < _pieces.length) {
+      _pieceIdx++;
+      _playPiece(_gen);
+      return;
+    }
     if (_chunkEnd >= b.sentences.length) {
       // End of the book. Keep [current] on the last sentence so every index
       // stays valid; pressing play again re-reads from there.
@@ -379,21 +426,6 @@ class TtsController extends ChangeNotifier {
     notifyListeners();
     // A rate change only affects the NEXT utterance; restart the current
     // sentence so the slider feels immediate.
-    if (playing) {
-      await _tts.stop();
-      await _piper.stop();
-      await _speakCurrent();
-    }
-  }
-
-  Future<void> setVoice(Map<String, String>? v) async {
-    voice = v;
-    progressSeen = false; // the new voice may not report word progress
-    await Store.saveVoice(v);
-    if (v != null && v['engine'] != 'piper') {
-      await _tts.setVoice({'name': v['name']!, 'locale': v['locale']!});
-    }
-    notifyListeners();
     if (playing) {
       await _tts.stop();
       await _piper.stop();

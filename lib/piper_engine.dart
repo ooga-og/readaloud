@@ -9,7 +9,8 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:path_provider/path_provider.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa;
 
-/// Offline neural TTS using a Piper voice model through sherpa-onnx.
+/// Offline neural TTS: the Kokoro model (English, int8) run through
+/// sherpa-onnx, speaking with its British male voice.
 ///
 /// The model ships inside the app as a zip asset and is extracted to the app
 /// support directory on first use. Synthesis runs on a dedicated worker
@@ -21,13 +22,15 @@ import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa;
 /// Fully offline: the model is a local file, synthesis and playback never
 /// touch the network.
 class PiperEngine {
-  /// Shown in the voice picker. Voice: Piper "northern_english_male"
-  /// (medium), trained on OpenSLR-83 — CC BY-SA 4.0, redistribution-safe.
-  static const voiceName = 'Nathan (neural, British English)';
-  static const voiceLocale = 'en-GB';
+  /// Shown in About / licenses.
+  static const voiceName = 'George (Kokoro neural voice, British English)';
 
-  static const _assetZip = 'assets/en_gb_male.zip';
-  static const _modelFile = 'en_GB-northern_english_male-medium.onnx';
+  static const _assetZip = 'assets/kokoro_en.zip';
+
+  /// Kokoro v0.19 speaker ids (from the model's README):
+  /// 0 af, 1 af_bella, 2 af_nicole, 3 af_sarah, 4 af_sky, 5 am_adam,
+  /// 6 am_michael, 7 bf_emma, 8 bf_isabella, 9 bm_george, 10 bm_lewis.
+  static const speakerId = 9; // bm_george
 
   final AudioPlayer _player = AudioPlayer();
 
@@ -43,10 +46,11 @@ class PiperEngine {
   String _dir = '';
   bool _wavFlip = false; // alternate two wav files so play/write never clash
 
-  /// One-slot prefetch cache: the next sentence is synthesized while the
-  /// current one plays, which is what makes playback gapless.
-  String? _prefetchKey;
-  Future<PiperAudio?>? _prefetchFuture;
+  /// Prefetch cache (a couple of entries deep): the next pieces of speech
+  /// are synthesized while the current one plays, which is what makes
+  /// playback gapless. Keyed by "speed|text".
+  final _prefetch = <String, Future<PiperAudio?>>{};
+  static const _prefetchDepth = 2;
 
   bool get ready => _toWorker != null;
 
@@ -63,42 +67,49 @@ class PiperEngine {
         readyCompleter.complete(msg);
         return;
       }
+      if (msg is String) {
+        // Worker failed to load the model.
+        if (!readyCompleter.isCompleted) {
+          readyCompleter.completeError(StateError(msg));
+        }
+        return;
+      }
       final list = msg as List;
       final id = list[0] as int;
       final c = _pending.remove(id);
       if (c == null) return;
       if (list[1] == null) {
-        debugPrint('Piper synthesis failed: ${list.length > 3 ? list[3] : ''}');
+        debugPrint('Synthesis failed: ${list.length > 3 ? list[3] : ''}');
         c.complete(null);
       } else {
-        c.complete(
-            PiperAudio(list[1] as Float32List, list[2] as int));
+        c.complete(PiperAudio(list[1] as Float32List, list[2] as int));
       }
     });
 
     _isolate = await Isolate.spawn(
-        _piperWorker, _WorkerArgs(fromWorker.sendPort, _dir));
-    _toWorker = await readyCompleter.future.timeout(
-      const Duration(seconds: 60),
-      onTimeout: () {
-        dispose();
-        throw TimeoutException('Piper model failed to load');
-      },
-    );
+        _ttsWorker, _WorkerArgs(fromWorker.sendPort, _dir));
+    try {
+      _toWorker = await readyCompleter.future.timeout(
+        const Duration(seconds: 90),
+        onTimeout: () => throw TimeoutException('voice model failed to load'),
+      );
+    } catch (_) {
+      dispose();
+      rethrow;
+    }
   }
 
   /// Unpack the asset zip into the support dir once; a marker file makes
   /// later launches skip straight past this.
   Future<String> _installModel() async {
     final support = await getApplicationSupportDirectory();
-    final dir =
-        Directory('${support.path}${Platform.pathSeparator}piper_en_gb_male');
+    final dir = Directory('${support.path}${Platform.pathSeparator}kokoro_en');
     final marker = File('${dir.path}${Platform.pathSeparator}.installed');
     if (await marker.exists()) return dir.path;
 
     final data = await rootBundle.load(_assetZip);
-    final archive = ZipDecoder().decodeBytes(data.buffer
-        .asUint8List(data.offsetInBytes, data.lengthInBytes));
+    final archive = ZipDecoder().decodeBytes(
+        data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes));
     for (final entry in archive) {
       final outPath =
           '${dir.path}${Platform.pathSeparator}${entry.name.replaceAll('/', Platform.pathSeparator)}';
@@ -114,24 +125,24 @@ class PiperEngine {
     return dir.path;
   }
 
-  /// Synthesize [text]; consumes the prefetch slot when it matches.
+  /// Synthesize [text]; consumes a prefetched result when one matches.
   Future<PiperAudio?> synthesize(String text, double speed) {
     final key = '$speed|$text';
-    if (_prefetchKey == key && _prefetchFuture != null) {
-      final f = _prefetchFuture!;
-      _prefetchKey = null;
-      _prefetchFuture = null;
-      return f;
-    }
-    return _request(text, speed);
+    final cached = _prefetch.remove(key);
+    return cached ?? _request(text, speed);
   }
 
-  /// Start synthesizing the NEXT sentence in the background.
-  void prefetch(String text, double speed) {
-    final key = '$speed|$text';
-    if (_prefetchKey == key) return;
-    _prefetchKey = key;
-    _prefetchFuture = _request(text, speed);
+  /// Start synthesizing upcoming [texts] in the background (at most
+  /// [_prefetchDepth] outstanding; older entries are dropped).
+  void prefetch(List<String> texts, double speed) {
+    for (final text in texts.take(_prefetchDepth)) {
+      final key = '$speed|$text';
+      if (_prefetch.containsKey(key)) continue;
+      _prefetch[key] = _request(text, speed);
+    }
+    while (_prefetch.length > _prefetchDepth) {
+      _prefetch.remove(_prefetch.keys.first);
+    }
   }
 
   Future<PiperAudio?> _request(String text, double speed) {
@@ -197,8 +208,7 @@ class PiperEngine {
     str(36, 'data');
     data.setUint32(40, samples.length * 2, Endian.little);
     for (var i = 0; i < samples.length; i++) {
-      data.setInt16(
-          44 + i * 2, (samples[i].clamp(-1.0, 1.0) * 32767).round(),
+      data.setInt16(44 + i * 2, (samples[i].clamp(-1.0, 1.0) * 32767).round(),
           Endian.little);
     }
     return data.buffer.asUint8List();
@@ -218,20 +228,29 @@ class _WorkerArgs {
 }
 
 /// Worker isolate: load the model once, then serve generate requests forever.
-Future<void> _piperWorker(_WorkerArgs args) async {
-  sherpa.initBindings();
+Future<void> _ttsWorker(_WorkerArgs args) async {
   final sep = Platform.pathSeparator;
-  final tts = sherpa.OfflineTts(sherpa.OfflineTtsConfig(
-    model: sherpa.OfflineTtsModelConfig(
-      vits: sherpa.OfflineTtsVitsModelConfig(
-        model: '${args.dir}$sep${PiperEngine._modelFile}',
-        tokens: '${args.dir}${sep}tokens.txt',
-        dataDir: '${args.dir}${sep}espeak-ng-data',
+  sherpa.OfflineTts tts;
+  try {
+    sherpa.initBindings();
+    tts = sherpa.OfflineTts(sherpa.OfflineTtsConfig(
+      model: sherpa.OfflineTtsModelConfig(
+        kokoro: sherpa.OfflineTtsKokoroModelConfig(
+          model: '${args.dir}${sep}model.int8.onnx',
+          voices: '${args.dir}${sep}voices.bin',
+          tokens: '${args.dir}${sep}tokens.txt',
+          dataDir: '${args.dir}${sep}espeak-ng-data',
+        ),
+        // Synthesis is the bottleneck: use most of the cores, leave one
+        // for the UI and audio.
+        numThreads: (Platform.numberOfProcessors - 1).clamp(2, 6),
+        debug: false,
       ),
-      numThreads: 2,
-      debug: false,
-    ),
-  ));
+    ));
+  } catch (e) {
+    args.main.send('model load failed: $e');
+    return;
+  }
   final port = ReceivePort();
   args.main.send(port.sendPort);
   await for (final msg in port) {
@@ -240,11 +259,21 @@ Future<void> _piperWorker(_WorkerArgs args) async {
     final id = list[0] as int;
     try {
       final text = list[1] as String;
-      // Piper chokes on empty/whitespace input; return a hair of silence so
-      // the playback chain keeps moving.
+      // Empty/whitespace input: return a hair of silence so the playback
+      // chain keeps moving.
+      final sw = Stopwatch()..start();
       final audio = text.trim().isEmpty
           ? null
-          : tts.generate(text: text, sid: 0, speed: list[2] as double);
+          : tts.generate(
+              text: text,
+              sid: PiperEngine.speakerId,
+              speed: list[2] as double);
+      if (audio != null && audio.sampleRate > 0) {
+        final secs = audio.samples.length / audio.sampleRate;
+        debugPrint('kokoro: ${text.length} chars -> ${secs.toStringAsFixed(1)}s '
+            'audio in ${sw.elapsedMilliseconds}ms '
+            '(RTF ${(sw.elapsedMilliseconds / 1000 / secs).toStringAsFixed(2)})');
+      }
       if (audio == null || audio.samples.isEmpty) {
         args.main.send([id, Float32List(800), 16000]);
       } else {

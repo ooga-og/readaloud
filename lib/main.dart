@@ -26,17 +26,13 @@ FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
 more details: https://www.gnu.org/licenses/gpl-3.0.html
 
 Source code: https://github.com/ooga-og/readaloud''');
-    yield const LicenseEntryWithLineBreaks(
-        ['Piper voice model "northern_english_male"'], '''
-The bundled neural voice is the Piper text-to-speech model
-"en_GB-northern_english_male" (medium), trained on the Crowdsourced
-high-quality UK and Ireland English Dialect speech data set (OpenSLR-83,
-https://openslr.org/83/) by Google.
+    yield const LicenseEntryWithLineBreaks(['Kokoro voice model'], '''
+The bundled neural voice is Kokoro (v0.19, int8) by hexgrad
+(https://huggingface.co/hexgrad/Kokoro-82M), speaking as the "bm_george"
+British English voice. Packaged for sherpa-onnx by the k2-fsa project.
 
-Licensed under Creative Commons Attribution-ShareAlike 4.0 International
-(CC BY-SA 4.0): https://creativecommons.org/licenses/by-sa/4.0/
-Model distributed unmodified, via the Piper project
-(https://github.com/rhasspy/piper, MIT license).''');
+Licensed under the Apache License, Version 2.0:
+https://www.apache.org/licenses/LICENSE-2.0''');
     yield const LicenseEntryWithLineBreaks(['espeak-ng'], '''
 Speech synthesis phonemization uses espeak-ng data and code, bundled inside
 the sherpa-onnx runtime.
@@ -219,9 +215,8 @@ class _HomeScreenState extends State<HomeScreen> {
               applicationName: 'TTS',
               applicationVersion: '1.0.0',
               applicationLegalese: '© 2026 · GNU GPL v3\n\n'
-                  'Neural voice: Piper "northern_english_male", trained on '
-                  'the Crowdsourced UK English corpus (OpenSLR-83), '
-                  'CC BY-SA 4.0.',
+                  'Voice: Kokoro neural TTS by hexgrad (Apache 2.0), '
+                  'British English "George".',
             ),
           ),
         ],

@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+1
+version: 1.0.1+2
 
 environment:
   sdk: ^3.13.1
@@ -82,10 +82,10 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
-  # Bundled offline neural voice (Piper en_GB northern_english_male for
-  # sherpa-onnx, CC BY-SA 4.0), extracted to the app support dir on first use.
+  # Bundled offline neural voice (Kokoro int8 English, Apache 2.0, for
+  # sherpa-onnx), extracted to the app support dir on first use.
   assets:
-    - assets/en_gb_male.zip
+    - assets/kokoro_en.zip
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

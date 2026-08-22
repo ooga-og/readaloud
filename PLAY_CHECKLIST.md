@@ -16,10 +16,11 @@ What remains is Play Console work — none of it is code.
   copy). With Play App Signing an upload key can be reset via Google
   support, but it's slow and painful.
 - **Icons**: adaptive launcher icons generated from `assets/icon/`.
-- **Bundled voice**: Piper `northern_english_male` (dataset OpenSLR-83,
-  **CC BY-SA 4.0** — redistribution is allowed WITH attribution; see
-  "Store listing" below). The previous Alan voice was removed because its
-  dataset is "All Rights Reserved" (not redistributable).
+- **Bundled voice**: Kokoro v0.19 (int8) by hexgrad, **Apache 2.0** —
+  freely redistributable; credited in the app's licenses screen. (Earlier
+  candidates: Alan was removed because its dataset is "All Rights
+  Reserved"; the Piper northern_english_male voice was replaced for
+  quality.)
 - **The upload artifact**: `flutter build appbundle --release` →
   `build/app/outputs/bundle/release/app-release.aab`. Play requires the
   .aab (not the .apk); it also serves each phone only its own CPU
@@ -46,10 +47,8 @@ What remains is Play Console work — none of it is code.
    - Feature graphic 1024×500.
    - At least 2 phone screenshots (run the app, screenshot library +
      reader).
-   - Short + full description. Include this attribution line in the full
-     description (required by the voice's CC BY-SA 4.0 license):
-     "Neural voice: Piper 'northern_english_male', trained on the Crowdsourced
-     UK English corpus (OpenSLR-83), CC BY-SA 4.0."
+   - Short + full description. A credit line is good practice (not legally
+     required under Apache 2.0): "Neural voice: Kokoro by hexgrad (Apache 2.0)."
 7. **Upload**: Production (or start with Internal testing) → upload
    `app-release.aab` → accept Play App Signing → roll out.
 

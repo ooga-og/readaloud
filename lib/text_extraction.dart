@@ -118,8 +118,8 @@ Future<ExtractedBook> _extractSync(_Job job) async {
     case 'epub':
       raw = await _fromEpub(job.bytes);
       break;
-    default: // treat anything else as plain text (UTF-8, tolerant of stray bytes)
-      raw = _fromTxt(utf8.decode(job.bytes, allowMalformed: true));
+    default: // treat anything else as plain text
+      raw = _fromTxt(_decodeText(job.bytes));
   }
 
   // Split each paragraph into sentences and build the index tables. Some raw
@@ -180,10 +180,64 @@ Future<ExtractedBook> _extractSync(_Job job) async {
 
 // ------------------------------------------------------------------- plain text
 
+/// Decode a text file's bytes. UTF-8 is the norm, but Windows Notepad's
+/// "Unicode" option writes UTF-16, which decoded as UTF-8 becomes letters
+/// interleaved with NUL bytes — and a TTS engine then spells the book out
+/// letter by letter. Detect it (BOM, or a flood of zero bytes) and decode
+/// properly.
+String _decodeText(Uint8List bytes) {
+  if (bytes.length >= 2) {
+    final bomLE = bytes[0] == 0xFF && bytes[1] == 0xFE;
+    final bomBE = bytes[0] == 0xFE && bytes[1] == 0xFF;
+    var zeros = 0;
+    final sample = bytes.length < 4000 ? bytes.length : 4000;
+    for (var i = 0; i < sample; i++) {
+      if (bytes[i] == 0) zeros++;
+    }
+    final looksUtf16 = bomLE || bomBE || zeros > sample ~/ 4;
+    if (looksUtf16) {
+      final bigEndian = bomBE || (!bomLE && bytes[0] == 0 && bytes[1] != 0);
+      final start = (bomLE || bomBE) ? 2 : 0;
+      final units = <int>[];
+      for (var i = start; i + 1 < bytes.length; i += 2) {
+        units.add(bigEndian
+            ? (bytes[i] << 8) | bytes[i + 1]
+            : bytes[i] | (bytes[i + 1] << 8));
+      }
+      return String.fromCharCodes(units);
+    }
+  }
+  var text = utf8.decode(bytes, allowMalformed: true);
+  if (text.isNotEmpty && text.codeUnitAt(0) == 0xFEFF) text = text.substring(1);
+  return text;
+}
+
+/// Some PDFs (and badly exported text) come out with a space between every
+/// letter — "T h e  c a t  s a t" — which makes a voice spell each letter.
+/// When a line is mostly single-character tokens, rebuild it: runs of
+/// spaced letters become words, and double spaces become word breaks.
+String _collapseSpacedLetters(String line) {
+  final tokens = line.trim().split(RegExp(r' +'));
+  if (tokens.length < 6) return line;
+  final singles = tokens.where((t) => t.length == 1).length;
+  if (singles < tokens.length * 0.7) return line;
+  return line
+      .trim()
+      .split(RegExp(r' {2,}|\t+'))
+      .map((w) => w.replaceAll(' ', ''))
+      .where((w) => w.isNotEmpty)
+      .join(' ');
+}
+
 /// TXT: paragraphs are separated by blank lines; single line breaks inside a
 /// paragraph are hard-wrapping and get joined with a space.
 _RawBook _fromTxt(String text) {
-  text = _dehyphenate(text.replaceAll('\r\n', '\n'));
+  text = text
+      .replaceAll('\r\n', '\n')
+      .split('\n')
+      .map(_collapseSpacedLetters)
+      .join('\n');
+  text = _dehyphenate(text);
   var blocks = text.split(RegExp(r'\n\s*\n'));
   // Some plain-text books have no blank lines at all; fall back to
   // one-line-per-paragraph so we don't produce a single giant paragraph.
@@ -212,7 +266,8 @@ _RawBook _fromPdf(Uint8List bytes) {
     // can run whole blocks together without newlines, which would defeat the
     // header/footer detection and paragraph rebuilding below.
     final lines = extractor.extractTextLines(startPageIndex: i, endPageIndex: i);
-    pages.add(lines.map((l) => l.text.trim()).toList());
+    pages.add(
+        lines.map((l) => _collapseSpacedLetters(l.text.trim())).toList());
   }
 
   // Headers/footers repeat on most pages (often with a changing page number).

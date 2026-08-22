@@ -16,18 +16,14 @@ use of any kind at runtime.
 - **Chapters** — detected automatically from EPUB navigation, PDF bookmarks
   (outline), or "Chapter N"-style headings in the text. Open the drawer
   (☰, top-left of the reader) to jump between them.
-- **Two voice engines** (voice picker: 🎙️ icon):
-  - **Nathan (neural, British English)** — a bundled Piper voice model run
-    through sherpa-onnx. Much more natural than system voices, identical on
-    both platforms, exact-sentence highlighting everywhere. The very first
-    play unpacks and loads the model (a few seconds; the play button shows a
-    spinner) — after that it's instant.
-  - **System voices** — whatever Windows/Android has installed. Spoken in
-    paragraph-sized chunks for smoothness; on Android the highlight tracks
-    the exact sentence (word-progress events), on Windows it tracks the
-    speaking chunk.
+- **One good voice** — "George", a bundled Kokoro neural voice (British
+  English) run through sherpa-onnx: natural, identical on both platforms,
+  exact-sentence highlighting. The very first play unpacks and loads the
+  model (a few seconds; the play button shows a spinner) — after that it's
+  instant. No voice menu to get lost in. If the model can't load on a
+  device, the app silently falls back to the system's own voice.
 - **Controls** — play/pause, ±sentence, ±paragraph, tap any sentence to jump
-  there, speed slider (0.5x–2.0x), voice picker.
+  there, reading-speed slider (0.5x–2.0x).
 - **Resume** — the position is saved continuously per book (keyed by file
   name + size, so it survives moved files and Android's copied picker paths).
 
@@ -70,20 +66,14 @@ that's fine, let it.
 
 ## Fully offline voices
 
-The **Nathan** neural voice is bundled and needs nothing — it works offline
-out of the box on both platforms. (Voice model: Piper
-`en_GB-northern_english_male`, trained on the Crowdsourced UK English
-corpus, OpenSLR-83, CC BY-SA 4.0.)
+The **George** neural voice is bundled and needs nothing — it works offline
+out of the box on both platforms. (Voice model: Kokoro v0.19 int8 by
+hexgrad, Apache 2.0, speaker `bm_george`.)
 
-For the **system voices**:
-
-- **Windows**: *Settings → Time & language → Speech*. The preinstalled
-  voices (David/Zira/Hazel…) already work offline; add more under
-  "Manage voices" → "Add voices" while online, then they work offline.
-- **Samsung/Android**: *Settings → General management → Text-to-speech* →
-  pick the engine (Samsung TTS or Google Speech services) → engine settings
-  → **Install voice data** and download the voices you want while online.
-  Downloaded voices work with no internet — flight-mode safe.
+The system-voice fallback only matters if the model fails to load. In that
+case the platform voice is used: on Samsung/Android, *Settings → General
+management → Text-to-speech → Install voice data* gets an offline voice; on
+Windows the preinstalled voices already work offline.
 
 ## Where things live
 
@@ -102,10 +92,9 @@ for the ready-to-host privacy policy.
 ReadAloud is free software, licensed under the
 [GNU GPL v3](LICENSE). The speech pipeline bundles
 [espeak-ng](https://github.com/espeak-ng/espeak-ng) (GPLv3) inside the
-sherpa-onnx runtime, and the neural voice model
-`en_GB-northern_english_male` is trained on the Crowdsourced UK English
-corpus ([OpenSLR-83](https://openslr.org/83/)), CC BY-SA 4.0. Full component
-credits are in the app under **About → View licenses**.
+sherpa-onnx runtime, and the neural voice model is
+[Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) by hexgrad (Apache
+2.0). Full component credits are in the app under **About → View licenses**.
 
 ## Project layout (for tinkering)
 

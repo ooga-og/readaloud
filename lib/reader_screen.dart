@@ -164,8 +164,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
               onPressed: () => _scaffoldKey.currentState?.openDrawer(),
             ),
           IconButton(
-            icon: const Icon(Icons.settings_voice),
-            tooltip: 'Voice & speed',
+            icon: const Icon(Icons.speed),
+            tooltip: 'Reading speed',
             onPressed: _showSettings,
           ),
         ],
@@ -281,10 +281,15 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 FilledButton(
                   onPressed: tts.togglePlay,
                   child: tts.preparing
-                      ? const SizedBox(
+                      ? SizedBox(
                           width: 28,
                           height: 28,
-                          child: CircularProgressIndicator(strokeWidth: 3),
+                          child: CircularProgressIndicator(
+                            strokeWidth: 3,
+                            // Explicit contrast: the default is the primary
+                            // colour, invisible on this primary-filled button.
+                            color: Theme.of(context).colorScheme.onPrimary,
+                          ),
                         )
                       : Icon(tts.playing ? Icons.pause : Icons.play_arrow,
                           size: 32),
@@ -312,7 +317,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
     );
   }
 
-  /// Bottom sheet with the speech-rate slider and system-voice picker.
+  /// Bottom sheet with the reading-speed slider. There is exactly one voice
+  /// (the bundled neural one), so nothing else to configure.
   void _showSettings() {
     showModalBottomSheet(
       context: context,
@@ -324,11 +330,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Speech rate',
+              Text('Reading speed',
                   style: Theme.of(context).textTheme.titleMedium),
               Slider(
                 value: tts.rate,
-                min: 0.25, // 0.5x — the slowest Windows TTS supports
+                min: 0.25, // 0.5x
                 max: 1.0, // 2.0x
                 divisions: 15,
                 label: tts.rate == 0.5
@@ -339,28 +345,14 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 onChanged: (v) => setSheetState(() => tts.rate = v),
                 onChangeEnd: (v) => tts.setRate(v),
               ),
-              const SizedBox(height: 8),
-              Text('Voice', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 4),
-              if (tts.voices.isEmpty)
-                const Text('No voices reported by the system TTS engine.')
-              else
-                DropdownButton<String>(
-                  isExpanded: true,
-                  value: tts.voice?['name'],
-                  hint: const Text('System default'),
-                  items: [
-                    for (final v in tts.voices)
-                      DropdownMenuItem(
-                        value: v['name'],
-                        child: Text('${v['name']}  (${v['locale']})',
-                            overflow: TextOverflow.ellipsis),
-                      ),
-                  ],
-                  onChanged: (name) => setSheetState(() {
-                    tts.setVoice(
-                        tts.voices.firstWhere((v) => v['name'] == name));
-                  }),
+              if (tts.usingSystemVoice)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    'The built-in voice could not be loaded on this device; '
+                    'using the system voice instead.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                 ),
             ],
           ),
