@@ -113,9 +113,22 @@ class PiperEngine {
       lastError = null;
     } catch (e) {
       lastError ??= '$e';
-      dispose();
+      _shutdownWorker(); // keep the player alive so a retry can succeed
       rethrow;
     }
+  }
+
+  void _shutdownWorker() {
+    _fromWorkerSub?.cancel();
+    _toWorker?.send('quit');
+    _isolate?.kill(priority: Isolate.immediate);
+    _isolate = null;
+    _toWorker = null;
+    for (final c in _pending.values) {
+      c.complete(null);
+    }
+    _pending.clear();
+    _prefetch.clear();
   }
 
   /// Unpack the asset zip into the support dir once, streaming it through a
@@ -132,7 +145,7 @@ class PiperEngine {
 
     if (await dir.exists()) await dir.delete(recursive: true);
     await dir.create(recursive: true);
-    final tmpZip = File('${support.path}${sep}kokoro_en.zip.tmp');
+    final tmpZip = File('${support.path}${sep}kokoro_en_unpack.zip');
     final data = await rootBundle.load(_assetZip);
     await tmpZip.writeAsBytes(
         data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes));
@@ -194,16 +207,7 @@ class PiperEngine {
 
   void dispose() {
     _player.dispose();
-    _fromWorkerSub?.cancel();
-    _toWorker?.send('quit');
-    _isolate?.kill(priority: Isolate.immediate);
-    _isolate = null;
-    _toWorker = null;
-    for (final c in _pending.values) {
-      c.complete(null);
-    }
-    _pending.clear();
-    _prefetch.clear();
+    _shutdownWorker();
   }
 
   /// Hook up the player's completion stream once.
