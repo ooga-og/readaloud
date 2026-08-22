@@ -110,10 +110,15 @@ class TtsController extends ChangeNotifier {
     _piper.init().catchError((e) => debugPrint('Voice warm-up failed: $e'));
   }
 
+  /// Why the neural voice was abandoned this session (shown in the speed
+  /// sheet and About dialog so a user can report it), or null if healthy.
+  String? fallbackReason;
+
   /// The bundled voice could not load or synthesize on this device: switch
   /// to the platform's TTS for the rest of the session and keep reading.
   void _fallBackToSystemVoice(Object reason) {
-    debugPrint('Neural voice unavailable, using system TTS: $reason');
+    fallbackReason = _piper.lastError ?? '$reason';
+    debugPrint('Neural voice unavailable, using system TTS: $fallbackReason');
     usingSystemVoice = true;
     notifyListeners();
     if (playing) _speakCurrent();

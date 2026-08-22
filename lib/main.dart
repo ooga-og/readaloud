@@ -217,6 +217,18 @@ class _HomeScreenState extends State<HomeScreen> {
               applicationLegalese: '© 2026 · GNU GPL v3\n\n'
                   'Voice: Kokoro neural TTS by hexgrad (Apache 2.0), '
                   'British English "George".',
+              children: [
+                const SizedBox(height: 12),
+                // Diagnostics: lets a user report exactly what went wrong
+                // with the neural voice on their device.
+                Text(
+                  _tts.usingSystemVoice
+                      ? 'Voice engine: FAILED — using system voice.\n'
+                          'Reason: ${_tts.fallbackReason ?? 'unknown'}'
+                      : 'Voice engine: built-in neural voice OK.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
             ),
           ),
         ],

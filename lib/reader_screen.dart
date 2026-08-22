@@ -349,8 +349,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Text(
-                    'The built-in voice could not be loaded on this device; '
-                    'using the system voice instead.',
+                    'The built-in voice is unavailable on this device, so the '
+                    'system voice is being used instead.\n'
+                    'Reason: ${tts.fallbackReason ?? 'unknown'}',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ),

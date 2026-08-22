@@ -1,8 +1,9 @@
 import 'dart:async';
+import 'dart:ffi' show nullptr;
 import 'dart:io';
 import 'dart:isolate';
 
-import 'package:archive/archive.dart';
+import 'package:archive/archive_io.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
@@ -26,8 +27,14 @@ class PiperEngine {
   static const voiceName = 'George (Kokoro neural voice, British English)';
 
   static const _assetZip = 'assets/kokoro_en.zip';
+  static const _modelFile = 'model.int8.onnx';
 
-  /// Kokoro v0.19 speaker ids (from the model's README):
+  /// Exact byte size of the model inside the zip — used to verify the
+  /// unpacked file is complete (a truncated model makes the engine fail
+  /// silently and "speak" empty audio).
+  static const _modelBytes = 134186977;
+
+  /// Kokoro v0.19 speaker ids:
   /// 0 af, 1 af_bella, 2 af_nicole, 3 af_sarah, 4 af_sky, 5 am_adam,
   /// 6 am_michael, 7 bf_emma, 8 bf_isabella, 9 bm_george, 10 bm_lewis.
   static const speakerId = 9; // bm_george
@@ -36,6 +43,9 @@ class PiperEngine {
 
   /// Fires when a spoken sentence finishes playing (not on stop()).
   void Function()? onComplete;
+
+  /// Human-readable reason the engine last failed (null when healthy).
+  String? lastError;
 
   Isolate? _isolate;
   SendPort? _toWorker;
@@ -58,7 +68,12 @@ class PiperEngine {
   /// Safe to call repeatedly; only the first call does work.
   Future<void> init() async {
     if (ready) return;
-    _dir = await _installModel();
+    try {
+      _dir = await _installModel();
+    } catch (e) {
+      lastError = 'could not unpack the voice model: $e';
+      rethrow;
+    }
 
     final fromWorker = ReceivePort();
     final readyCompleter = Completer<SendPort>();
@@ -69,6 +84,7 @@ class PiperEngine {
       }
       if (msg is String) {
         // Worker failed to load the model.
+        lastError = msg;
         if (!readyCompleter.isCompleted) {
           readyCompleter.completeError(StateError(msg));
         }
@@ -79,7 +95,8 @@ class PiperEngine {
       final c = _pending.remove(id);
       if (c == null) return;
       if (list[1] == null) {
-        debugPrint('Synthesis failed: ${list.length > 3 ? list[3] : ''}');
+        lastError = 'synthesis failed: ${list.length > 3 ? list[3] : '?'}';
+        debugPrint(lastError);
         c.complete(null);
       } else {
         c.complete(PiperAudio(list[1] as Float32List, list[2] as int));
@@ -90,38 +107,46 @@ class PiperEngine {
         _ttsWorker, _WorkerArgs(fromWorker.sendPort, _dir));
     try {
       _toWorker = await readyCompleter.future.timeout(
-        const Duration(seconds: 90),
+        const Duration(seconds: 120),
         onTimeout: () => throw TimeoutException('voice model failed to load'),
       );
-    } catch (_) {
+      lastError = null;
+    } catch (e) {
+      lastError ??= '$e';
       dispose();
       rethrow;
     }
   }
 
-  /// Unpack the asset zip into the support dir once; a marker file makes
-  /// later launches skip straight past this.
+  /// Unpack the asset zip into the support dir once, streaming it through a
+  /// temp file so a phone never has to hold ~250 MB in memory. The unpacked
+  /// model is size-checked every launch; a damaged copy is re-extracted.
   Future<String> _installModel() async {
     final support = await getApplicationSupportDirectory();
-    final dir = Directory('${support.path}${Platform.pathSeparator}kokoro_en');
-    final marker = File('${dir.path}${Platform.pathSeparator}.installed');
-    if (await marker.exists()) return dir.path;
-
-    final data = await rootBundle.load(_assetZip);
-    final archive = ZipDecoder().decodeBytes(
-        data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes));
-    for (final entry in archive) {
-      final outPath =
-          '${dir.path}${Platform.pathSeparator}${entry.name.replaceAll('/', Platform.pathSeparator)}';
-      if (entry.isFile) {
-        final out = File(outPath);
-        await out.create(recursive: true);
-        await out.writeAsBytes(entry.content as List<int>);
-      } else {
-        await Directory(outPath).create(recursive: true);
-      }
+    final sep = Platform.pathSeparator;
+    final dir = Directory('${support.path}${sep}kokoro_en');
+    final model = File('${dir.path}$sep$_modelFile');
+    if (await model.exists() && await model.length() == _modelBytes) {
+      return dir.path;
     }
-    await marker.writeAsString('ok');
+
+    if (await dir.exists()) await dir.delete(recursive: true);
+    await dir.create(recursive: true);
+    final tmpZip = File('${support.path}${sep}kokoro_en.zip.tmp');
+    final data = await rootBundle.load(_assetZip);
+    await tmpZip.writeAsBytes(
+        data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes));
+    try {
+      await extractFileToDisk(tmpZip.path, dir.path);
+    } finally {
+      if (await tmpZip.exists()) await tmpZip.delete();
+    }
+
+    final size = await model.exists() ? await model.length() : -1;
+    if (size != _modelBytes) {
+      throw StateError(
+          'model file incomplete after unpack ($size of $_modelBytes bytes)');
+    }
     return dir.path;
   }
 
@@ -178,6 +203,7 @@ class PiperEngine {
       c.complete(null);
     }
     _pending.clear();
+    _prefetch.clear();
   }
 
   /// Hook up the player's completion stream once.
@@ -236,7 +262,7 @@ Future<void> _ttsWorker(_WorkerArgs args) async {
     tts = sherpa.OfflineTts(sherpa.OfflineTtsConfig(
       model: sherpa.OfflineTtsModelConfig(
         kokoro: sherpa.OfflineTtsKokoroModelConfig(
-          model: '${args.dir}${sep}model.int8.onnx',
+          model: '${args.dir}$sep${PiperEngine._modelFile}',
           voices: '${args.dir}${sep}voices.bin',
           tokens: '${args.dir}${sep}tokens.txt',
           dataDir: '${args.dir}${sep}espeak-ng-data',
@@ -244,11 +270,19 @@ Future<void> _ttsWorker(_WorkerArgs args) async {
         // Synthesis is the bottleneck: use most of the cores, leave one
         // for the UI and audio.
         numThreads: (Platform.numberOfProcessors - 1).clamp(2, 6),
-        debug: false,
+        debug: true, // native-side load errors go to the system log
       ),
     ));
   } catch (e) {
-    args.main.send('model load failed: $e');
+    args.main.send('voice engine failed to start: $e');
+    return;
+  }
+  // sherpa-onnx does NOT throw when the native engine can't be created —
+  // it hands back a null handle that then "synthesizes" silence. Catch
+  // that here so the app falls back to a working voice and says why.
+  if (tts.ptr == nullptr) {
+    args.main.send('voice engine could not load the model on this device '
+        '(null engine handle — model files damaged or unsupported)');
     return;
   }
   final port = ReceivePort();
@@ -259,26 +293,23 @@ Future<void> _ttsWorker(_WorkerArgs args) async {
     final id = list[0] as int;
     try {
       final text = list[1] as String;
-      // Empty/whitespace input: return a hair of silence so the playback
-      // chain keeps moving.
-      final sw = Stopwatch()..start();
-      final audio = text.trim().isEmpty
-          ? null
-          : tts.generate(
-              text: text,
-              sid: PiperEngine.speakerId,
-              speed: list[2] as double);
-      if (audio != null && audio.sampleRate > 0) {
-        final secs = audio.samples.length / audio.sampleRate;
-        debugPrint('kokoro: ${text.length} chars -> ${secs.toStringAsFixed(1)}s '
-            'audio in ${sw.elapsedMilliseconds}ms '
-            '(RTF ${(sw.elapsedMilliseconds / 1000 / secs).toStringAsFixed(2)})');
-      }
-      if (audio == null || audio.samples.isEmpty) {
+      if (text.trim().isEmpty) {
+        // Nothing to say: a hair of silence keeps the playback chain moving.
         args.main.send([id, Float32List(800), 16000]);
-      } else {
-        args.main.send([id, audio.samples, audio.sampleRate]);
+        continue;
       }
+      final sw = Stopwatch()..start();
+      final audio = tts.generate(
+          text: text, sid: PiperEngine.speakerId, speed: list[2] as double);
+      if (audio.samples.isEmpty || audio.sampleRate <= 0) {
+        args.main.send([id, null, 0, 'engine returned no audio for text']);
+        continue;
+      }
+      final secs = audio.samples.length / audio.sampleRate;
+      debugPrint('kokoro: ${text.length} chars -> ${secs.toStringAsFixed(1)}s '
+          'audio in ${sw.elapsedMilliseconds}ms '
+          '(RTF ${(sw.elapsedMilliseconds / 1000 / secs).toStringAsFixed(2)})');
+      args.main.send([id, audio.samples, audio.sampleRate]);
     } catch (e) {
       args.main.send([id, null, 0, '$e']);
     }
